@@ -2,7 +2,7 @@
 
 ### Disclaimer:
 
-This was built by Claude Code Opus 5.5. I fed Claude Windows Problem Reporting error logs and x32dbg screenshots. I created this due to being bored of running FS95 and FS98 under VMware and much preferring them to work natively on Windows 10 and 11 like CFS1, FS2000, and so. I like being able to directly access the game files without turning on a virtual environment, let alone the games run better directly on Windows rather than said virtual environment.
+This was built by Claude Code Opus 5.5. I fed Claude Windows Problem Reporting error logs and x32dbg screenshots. I created this due to being bored of running *FS95* and *FS98* under VMware and much preferring them to work natively on Windows 10 and 11 like *CFS1*, *FS2000*, etc. I like being able to directly access the game files without turning on a virtual environment, let alone the games run better directly rather than in said virtual environment.
 
 Please contribute if you like, maybe add some actual human-written code instead of taking a shortcut like I did.
 
@@ -29,7 +29,8 @@ It does nothing in any other program or EXE build.
 ### How to install and delete:
 - Copy FSDIVFIX.DLL into the Modules folder inside the main games folder.
 Use the game's own EXEs (original or official patch), not one changed by the FS95/FS98 Win64 EXE patcher I originally supplied; with that patch the DLL stays inactive.
-+ To delete, just remove FSDIVFIX.DLL from the Modules folder.
+* To delete, just remove FSDIVFIX.DLL from the Modules folder.
++ It does not require anything else to be installed.
 
 ### Why did the games crash on 64-bit editions of Windows::
 The games deliberately let some integer divisions fail and rely on their own handler, DIVTRAP.DLL for *FS95* and inside FLTSIM98.EXE for *FS98*. When a division fails, it reads the instruction from memory, puts a capped result in the right registers, and skips past the instruction. On 64-bit Windows, that handler can't be reached while the game is handling a window message, so Windows ends the game instead. The games run everything under it with __try/__except, which is exactly the mechanism 64-bit Windows can’t reach inside a window callback. More information better explained [here](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nc-winuser-wndproc).
