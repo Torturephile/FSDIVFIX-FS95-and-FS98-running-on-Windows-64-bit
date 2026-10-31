@@ -14,6 +14,12 @@ FSDIVFIX.DLL is a module that allows *Flight Simulator for Windows 95* and *Flig
 
 This DLL is meant to replace the [EXE patcher](https://github.com/Torturephile/FS95-and-FS98-Win64-patcher/tree/main) that was created previously so no game files will be modified at all. It's just a simple drag and drop. It also works with games' official patches, unlike the EXE patcher.
 
+### How to install and delete:
+- Copy FSDIVFIX.DLL into the Modules folder inside the main games folder.
+Use the game's own EXEs (original or official patch), not one changed by the FS95/FS98 Win64 EXE patcher I originally supplied; with that patch the DLL stays inactive.
+* To delete, just remove FSDIVFIX.DLL from the Modules folder.
++ It does not require anything else to be installed.
+
 ### How it works:
 Both games load every DLL in their Modules folder as one of their own modules. FSDIVFIX.DLL exports the "Linkage" block the games require, with a module ID no real module uses and nothing else set, so the game registers it and otherwise leaves it alone. When it loads, it identifies the game build, checks that the game's handler is exactly where and what it expects, and registers that handler in a way 64-bit Windows does call. It is used only for integer divide faults in the game's own files (and, for FS98 6.10.446, whose handler also covers floating-point exceptions like in *CFS1*, for those too); every other error, and any fault in Windows or other programs' DLLs, is passed on exactly as before.
 
@@ -25,12 +31,6 @@ It does nothing in any other program or EXE build.
 + *FS98* version 6.10.418  (original game install)
 - *FS98* version 6.10.419  (official [fsconv98.exe](https://simviation.com/1/download-file?file=fsconv98.exe) patch)
 * *FS98* version 6.10.446  (official [fs98pat1.exe](https://simviation.com/1/download-file?file=fs98pat1.exe) patch)
-
-### How to install and delete:
-- Copy FSDIVFIX.DLL into the Modules folder inside the main games folder.
-Use the game's own EXEs (original or official patch), not one changed by the FS95/FS98 Win64 EXE patcher I originally supplied; with that patch the DLL stays inactive.
-* To delete, just remove FSDIVFIX.DLL from the Modules folder.
-+ It does not require anything else to be installed.
 
 ### Why did the games crash on 64-bit editions of Windows::
 The games deliberately let some integer divisions fail and rely on their own handler, DIVTRAP.DLL for *FS95* and inside FLTSIM98.EXE for *FS98*. When a division fails, it reads the instruction from memory, puts a capped result in the right registers, and skips past the instruction. On 64-bit Windows, that handler can't be reached while the game is handling a window message, so Windows ends the game instead. The games run everything under it with __try/__except, which is exactly the mechanism 64-bit Windows can’t reach inside a window callback. More information better explained [here](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nc-winuser-wndproc).
