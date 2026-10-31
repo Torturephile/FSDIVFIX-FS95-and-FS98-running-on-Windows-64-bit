@@ -15,8 +15,7 @@ FSDIVFIX.DLL is a module that allows *Flight Simulator for Windows 95* and *Flig
 This DLL is meant to replace the [EXE patcher](https://github.com/Torturephile/FS95-and-FS98-Win64-patcher/tree/main) that was created previously so no game files will be modified at all. It's just a simple drag and drop. It also works with games' official patches, unlike the EXE patcher.
 
 ### How to install and delete:
-- Copy FSDIVFIX.DLL into the Modules folder inside the main games folder.
-Use the game's own EXEs (original or official patch), not one changed by the FS95/FS98 Win64 EXE patcher I originally supplied; with that patch the DLL stays inactive.
+- Copy FSDIVFIX.DLL into the Modules folder inside the main games folder. Use the game's own EXEs (original or official patch), not ones changed by the FS95/FS98 Win64 EXE patcher..
 * To delete, just remove FSDIVFIX.DLL from the Modules folder.
 + It does not require anything else to be installed.
 
