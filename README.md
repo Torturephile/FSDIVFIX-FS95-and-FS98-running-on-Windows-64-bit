@@ -40,3 +40,10 @@ This package contains no Microsoft code. The source code is inside the source fo
 
 SHA-256 of FSDIVFIX.DLL:
   D337C8049569141B260B724873627D5C38CFF6A58F15FF0C033F7D2C26A3DDF4
+
+### Other goodies:
+For *FS95*, give the [ILS patch](https://web.archive.org/web/19990117055640/http://www.microsoft.com/games/fsim/downloads.htm) a go. It's located at the bottom of the page. Sadly, the other downloads in the page don't work.
+
+For *FS98*, use [DDrawCompat](https://github.com/narzoul/DDrawCompat) to fix the hardware renderer's issue displaying the 2D panel, plus other improvements. That also helps with *FS2000* which has the same issue in full screen. I also suggest that if you install *FS98*'s official patch, backup the original HG2D.DLL and replace the patched version with it, as the patched version introduces an annoying bug with the hardware renderer that wipes out all textures whenever the program's 3D window is clicked at and so on. The only expense is the flaps volume will be inconsistent at times.
+
+I suggest getting [WinHlp32.EXE](https://github.com/knuth-konrad/winhlp32-on-windows10), as these games need it to display help items, similar to the Learing Center from FS2004 and FSX.
