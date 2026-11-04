@@ -28,8 +28,8 @@ It does nothing in any other program or EXE build.
 - *FS95* version 6.00.117  (original game install)
 * *FS95* version 6.00.119  (official [fsconv.exe](https://web.archive.org/web/19990117005131/microsoft.com/games/fsim/converter.htm) patch)
 + *FS98* version 6.10.418  (original game install)
-- *FS98* version 6.10.419  (official [fsconv98.exe](https://web.archive.org/web/19990117055640/http://www.microsoft.com/games/fsim/downloads.htm) patch)
-* *FS98* version 6.10.446  (official [fs98pat1.exe](https://web.archive.org/web/19990117055640/http://www.microsoft.com/games/fsim/downloads.htm) patch)
+- *FS98* version 6.10.419  (official [fsconv98.exe](https://simviation.com/1/download-file?file=fsconv98.exe) patch)
+* *FS98* version 6.10.446  (official [fs98pat1.exe](https://simviation.com/1/download-file?file=fs98pat1.exe) patch)
 
 ### Why did the games crash on 64-bit editions of Windows::
 The games deliberately let some integer divisions fail and rely on their own handler, DIVTRAP.DLL for *FS95* and inside FLTSIM98.EXE for *FS98*. When a division fails, it reads the instruction from memory, puts a capped result in the right registers, and skips past the instruction. On 64-bit Windows, that handler can't be reached while the game is handling a window message, so Windows ends the game instead. The games run everything under it with __try/__except, which is exactly the mechanism 64-bit Windows can’t reach inside a window callback. More information better explained [here](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nc-winuser-wndproc).
