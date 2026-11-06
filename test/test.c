@@ -80,7 +80,7 @@ static int untouched(LONG r)   { return r == 0 && rd32(ctx + EAX) == 0xD2FF0474 
 
 static const struct { const char *exe; int fs95; } builds[] = {
     { "in/fs95_117.exe", 1 }, { "in/fs95_119.exe", 1 },
-    { "in/fs98_418.exe", 0 }, { "in/fs98_419.exe", 0 }, { "in/fs98_446.exe", 0 },
+    { "in/fs98_418.exe", 0 }, { "in/fs98_419.exe", 0 }, { "in/fs98_419b.exe", 0 }, { "in/fs98_446.exe", 0 },
 };
 static BYTE hdr[0x400], bad_divtrap[0x2000];
 
@@ -93,7 +93,7 @@ void _start(void)
     CORE_API api = { f_gmhex, f_gmfn, f_glpn };
     int which;
 
-    for (int b = 0; b < 5; b++) {
+    for (int b = 0; b < 6; b++) {
         BYTE *exe = map_pe(builds[b].exe);              /* at 0x400000 */
         const BYTE *dt = builds[b].fs95 ? divtrap : 0;
         out("== "); out(core_games[b].name); out("\n");
@@ -123,9 +123,53 @@ void _start(void)
             exe[core_games[b].filter_rva + 5] ^= 0xFF;
         }
     }
+    out("== builds not in the table (timestamp changed to an unknown value, 0x35000000)\n");
+    static const char *const unl[] = { "in/fs98_418.exe", "in/fs98_419.exe", "in/fs98_446.exe" };
+    static const int unl_x87[] = { 0, 0, 1 };
+    for (int u = 0; u < 3; u++) {
+        BYTE *exe = map_pe(unl[u]);
+        const BYTE *pe = exe + rd32(exe + 0x3C);
+        wr32(exe + (pe - exe) + 8, 0x35000000);
+        out("  "); out(unl[u]); out("\n");
+        check(core_setup(&api, exe, 0, &which) == SETUP_OK && which == -3, "filter found through the game's __except filter");
+        check(int_handled(fault(0xC0000095, 0x206B1A46)), "integer overflow in G3D.DLL: game's result");
+        check(untouched(fault(0xC0000094, 0x75001000)), "divide fault in KERNEL32: passed on");
+        if (unl_x87[u]) check(x87_handled(fault(0xC000008E, 0x206B2000)), "x87 fault in game code: game's FPU handler (dispatcher found)");
+        else            check(untouched(fault(0xC000008E, 0x206B2000)), "x87 fault: passed on");
+        /* a second call site makes it ambiguous: stay inert */
+        BYTE *p = 0;
+        for (DWORD i = 0x1000; i < 0x15000 && !p; i++)
+            if (exe[i] == 0x8B && exe[i+1] == 0x45 && exe[i+2] == 0xEC && exe[i+3] == 0x50 && exe[i+4] == 0xE8 && exe[i+9] == 0xC3) p = exe + i;
+        BYTE save[10]; for (int k = 0; k < 10; k++) save[k] = exe[0x14F00 + k];
+        for (int k = 0; k < 10; k++) exe[0x14F00 + k] = p[k];
+        check(core_setup(&api, exe, 0, &which) == SETUP_NOT_SUPPORTED, "two such filters: ambiguous, stays inert");
+        for (int k = 0; k < 10; k++) exe[0x14F00 + k] = save[k];
+        p[9 - 4] ^= 0x40;                               /* call goes somewhere else */
+        check(core_setup(&api, exe, 0, &which) == SETUP_NOT_SUPPORTED, "filter calls an unknown routine: stays inert");
+    }
+    {
+        BYTE *exe = map_pe("in/fs95_117.exe");
+        const BYTE *pe = exe + rd32(exe + 0x3C);
+        wr32(exe + (pe - exe) + 8, 0x35000000);
+        out("  in/fs95_117.exe\n");
+        check(core_setup(&api, exe, divtrap, &which) == SETUP_OK && which == -2, "FS95-style: DIVTRAP.DLL's filter verified and used");
+        check(int_handled(fault(0xC0000095, 0x206B1A46)), "integer overflow in G3D.DLL: game's result");
+        check(core_setup(&api, exe, bad_divtrap, &which) == SETUP_NOT_SUPPORTED, "with a different DIVTRAP.DLL: stays inert");
+        check(core_setup(&api, exe, 0, &which) == SETUP_NOT_SUPPORTED, "without DIVTRAP.DLL: stays inert");
+    }
+    {
+        BYTE *exe = map_pe("in/fs98_418_v3patched.exe");
+        check(core_setup(&api, exe, 0, &which) == SETUP_EXE_ALREADY_PATCHED, "v3-patched FLTSIM98.EXE: stays inert");
+        const BYTE *pe = exe + rd32(exe + 0x3C);
+        wr32(exe + (pe - exe) + 8, 0x35000000);
+        check(core_setup(&api, exe, 0, &which) == SETUP_EXE_ALREADY_PATCHED, "v3-patched EXE with an unlisted timestamp (.fsfix section): stays inert");
+    }
     out("== other programs\n");
     BYTE *cfs = map_pe("in/combatfs.exe");
-    check(core_setup(&api, cfs, 0, &which) == SETUP_NOT_SUPPORTED, "Combat Flight Simulator EXE: stays inert");
+    check(core_setup(&api, cfs, 0, &which) == SETUP_OK && which == -3, "Combat Flight Simulator: same handler design, recognised");
+    check(int_handled(fault(0xC0000094, 0x00407120)), "  CFS divide by zero in game code: CFS's own result");
+    BYTE *dll = map_pe("in/FSDIVFIX.DLL");
+    check(core_setup(&api, dll, 0, &which) == SETUP_NOT_SUPPORTED, "an unrelated PE image (FSDIVFIX.DLL itself): stays inert");
     for (int i = 0; i < 0x400; i++) hdr[i] = cfs[i];
     hdr[0] = 'X';
     check(core_setup(&api, hdr, 0, &which) == SETUP_NOT_SUPPORTED, "not a PE image: stays inert");
