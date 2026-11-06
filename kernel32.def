@@ -4,5 +4,5 @@ GetModuleHandleA@4
 GetModuleHandleExA@12
 GetModuleFileNameA@12
 GetLongPathNameA@12
-AddVectoredExceptionHandler@8
+GetProcAddress@8
 DisableThreadLibraryCalls@4
