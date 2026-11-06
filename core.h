@@ -27,7 +27,8 @@ typedef struct {
 
 typedef LONG (WINAPI *FILTER)(EXCEPTION_POINTERS *);
 
-/* The Windows functions the core needs (filled in by dllmain.c or the tests). */
+/* The Windows functions the core needs: used only by the test build (CORE_TEST);
+ * the DLL calls KERNEL32 directly and passes 0. */
 typedef struct {
     BOOL  (WINAPI *GetModuleHandleExA)(DWORD flags, const char *name, HMODULE *module);
     DWORD (WINAPI *GetModuleFileNameA)(HMODULE module, char *buf, DWORD size);
@@ -57,7 +58,8 @@ enum {
 extern const GAME core_games[];
 extern const int  core_game_count;
 
-/* exe_base: the EXE; divtrap_base: DIVTRAP.DLL or 0. *which receives the matched game (or -1). */
+/* exe_base: the EXE; divtrap_base: DIVTRAP.DLL or 0. *which receives the matched table entry,
+ * or -2 (unlisted build, DIVTRAP.DLL filter) / -3 (unlisted build, filter found in the EXE), or -1. */
 int  core_setup(const CORE_API *api, const BYTE *exe_base, const BYTE *divtrap_base, int *which);
 LONG WINAPI core_veh(EXCEPTION_POINTERS *ep);
 
