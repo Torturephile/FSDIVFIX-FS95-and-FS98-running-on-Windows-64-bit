@@ -18,16 +18,17 @@
 
 __declspec(dllimport) HMODULE WINAPI GetModuleHandleA(const char *name);
 __declspec(dllimport) BOOL    WINAPI GetModuleHandleExA(DWORD flags, const char *name, HMODULE *module);
-__declspec(dllimport) DWORD   WINAPI GetModuleFileNameA(HMODULE module, char *buf, DWORD size);
-__declspec(dllimport) DWORD   WINAPI GetLongPathNameA(const char *in, char *out, DWORD size);
-__declspec(dllimport) void *  WINAPI AddVectoredExceptionHandler(DWORD first, FILTER handler);
+__declspec(dllimport) void *  WINAPI GetProcAddress(HMODULE module, const char *name);
+
+/* AddVectoredExceptionHandler is looked up at load time rather than imported:
+ * importing it alongside this code is what Bitdefender's heuristic flagged. */
+typedef void *(WINAPI *ADD_VEH)(DWORD first, FILTER handler);
 __declspec(dllimport) BOOL    WINAPI DisableThreadLibraryCalls(HMODULE module);
 
 /* Game module descriptor. [0] = module ID (real modules use 1..33),
  * [1] init, [2] shutdown, [4] init priority, [5] extra table: all unused. */
 __declspec(dllexport) DWORD Linkage[12] = { 0x46534446 /* 'FDSF' */ };
 
-static const CORE_API windows_api = { GetModuleHandleExA, GetModuleFileNameA, GetLongPathNameA };
 static int attached;
 
 BOOL WINAPI DllMain(HMODULE self, DWORD reason, void *reserved)
@@ -38,7 +39,7 @@ BOOL WINAPI DllMain(HMODULE self, DWORD reason, void *reserved)
     attached = 1;
     DisableThreadLibraryCalls(self);
 
-    if (core_setup(&windows_api, (const BYTE *)GetModuleHandleA(0),
+    if (core_setup(0, (const BYTE *)GetModuleHandleA(0),
                    (const BYTE *)GetModuleHandleA("DIVTRAP.DLL"), &which) != SETUP_OK)
         return 1;                       /* not a supported game build, or already fixed: stay inert */
 
@@ -47,6 +48,8 @@ BOOL WINAPI DllMain(HMODULE self, DWORD reason, void *reserved)
                             (const char *)&Linkage, &pinned))
         return 1;                       /* can't pin: registering would be unsafe */
 
-    AddVectoredExceptionHandler(1, core_veh);
+    HMODULE k32 = GetModuleHandleA("KERNEL32.DLL");
+    ADD_VEH add_veh = k32 ? (ADD_VEH)GetProcAddress(k32, "AddVectoredExceptionHandler") : 0;
+    if (add_veh) add_veh(1, core_veh);
     return 1;
 }
