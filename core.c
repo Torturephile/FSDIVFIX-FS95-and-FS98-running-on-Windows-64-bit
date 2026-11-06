@@ -11,7 +11,13 @@
  * instruction is NOT inside a DLL located outside the game folder. FS98 6.10.446
  * (fs98pat1) also routes x87 exceptions through its filter, so for that build
  * the x87 codes are passed on to it too, with the same location check.
- * Every other exception is passed on unchanged (EXCEPTION_CONTINUE_SEARCH). */
+ * Every other exception is passed on unchanged (EXCEPTION_CONTINUE_SEARCH).
+ *
+ * Builds are recognised exactly from a table. For an EXE that isn't in the
+ * table (some releases share a version number but differ), the filter is
+ * found instead: FS95-style through DIVTRAP.DLL, FS98-style by finding the
+ * single __except filter in the EXE that calls one of the known filter
+ * routines ("mov eax,[ebp-14h] / push eax / call X / ret"). */
 #include "core.h"
 
 #define STATUS_INTEGER_DIVIDE_BY_ZERO 0xC0000094UL
@@ -38,12 +44,35 @@ const GAME core_games[] = {
     { "FS95 6.00.119 (fsconv patch)",      0x328B66AB, 0x12BC0, 0x1F000, 1, 0x01010, divtrap_filter,     0 },
     { "FS98 6.10.418 (original)",          0x33E94BD5, 0x14CE0, 0x21000, 0, 0x119A0, fs98_filter,        0 },
     { "FS98 6.10.419 (fsconv98 patch)",    0x3447DD25, 0x14D80, 0x21000, 0, 0x11A30, fs98_filter,        0 },
+    { "FS98 6.10.419 (second release)",    0x34568C48, 0x14D80, 0x21000, 0, 0x11A30, fs98_filter,        0 },
     { "FS98 6.10.446 (fs98pat1 patch)",    0x3498D991, 0x14E50, 0x21000, 0, 0x121D0, fs98_446_dispatch,  1 },
 };
 const int core_game_count = sizeof core_games / sizeof core_games[0];
 
-/* ---- state ---- */
+/* ---- Windows functions ----
+ * The DLL calls KERNEL32 directly. Only the test build (CORE_TEST) goes
+ * through a table of replaceable functions, so the logic can be tested with
+ * fake ones; indirect calls through such a table are what some antivirus
+ * heuristics flag, so the shipped DLL doesn't use one. */
+#ifdef CORE_TEST
 static const CORE_API *api;
+#define W_GetModuleHandleExA api->GetModuleHandleExA
+#define W_GetModuleFileNameA api->GetModuleFileNameA
+#define W_GetLongPathNameA   api->GetLongPathNameA
+#define HAVE_LONGPATH  (api->GetLongPathNameA != 0)
+#define HAVE_MODULE_FNS (api->GetModuleHandleExA && api->GetModuleFileNameA)
+#else
+__declspec(dllimport) BOOL  WINAPI GetModuleHandleExA(DWORD flags, const char *name, HMODULE *module);
+__declspec(dllimport) DWORD WINAPI GetModuleFileNameA(HMODULE module, char *buf, DWORD size);
+__declspec(dllimport) DWORD WINAPI GetLongPathNameA(const char *in, char *out, DWORD size);
+#define W_GetModuleHandleExA GetModuleHandleExA
+#define W_GetModuleFileNameA GetModuleFileNameA
+#define W_GetLongPathNameA   GetLongPathNameA
+#define HAVE_LONGPATH  1
+#define HAVE_MODULE_FNS 1
+#endif
+
+/* ---- state ---- */
 static FILTER g_filter;
 static int    g_x87;                 /* also pass x87 exceptions to the filter */
 static DWORD  g_dirlen;              /* 0 = location check off: every handled fault goes to the filter */
@@ -76,7 +105,7 @@ static int is_game_code(void *addr)
     const char *p;
     DWORD n, verdict, i;
 
-    if (!api->GetModuleHandleExA(FROM_ADDRESS_UNCHANGED_REFCOUNT, (const char *)addr, &mod))
+    if (!W_GetModuleHandleExA(FROM_ADDRESS_UNCHANGED_REFCOUNT, (const char *)addr, &mod))
         return 1;                                    /* not inside any module */
 
     DWORD h = (DWORD)mod;
@@ -87,11 +116,11 @@ static int is_game_code(void *addr)
         }
     }
 
-    n = api->GetModuleFileNameA(mod, path, PATH_MAX_A);
+    n = W_GetModuleFileNameA(mod, path, PATH_MAX_A);
     if (n == 0 || n >= PATH_MAX_A) return 1;         /* unsure: treat as game code */
     p = path;
-    if (api->GetLongPathNameA) {
-        n = api->GetLongPathNameA(path, longpath, PATH_BUF);
+    if (HAVE_LONGPATH) {
+        n = W_GetLongPathNameA(path, longpath, PATH_BUF);
         if (n && n < PATH_BUF) p = longpath;
     }
 
@@ -116,9 +145,39 @@ LONG WINAPI core_veh(EXCEPTION_POINTERS *ep)
     return g_filter(ep);
 }
 
+/* FS98-style EXE not in the table: find its filter. Returns the filter's RVA or 0. */
+static DWORD find_exe_filter(const BYTE *exe, const BYTE *pe, int *x87)
+{
+    int nsec = pe[6] | (pe[7] << 8);
+    const BYTE *sh = pe + 24 + (pe[20] | (pe[21] << 8));
+    DWORD found = 0, sites = 0;
+    for (int s = 0; s < nsec; s++, sh += 40) {
+        if (!(rd32(sh + 36) & 0x20000000)) continue;              /* executable sections only */
+        DWORD va = rd32(sh + 12), vs = rd32(sh + 8);
+        for (DWORD i = va; i + 10 <= va + vs; i++) {
+            const BYTE *p = exe + i;
+            if (p[0] != 0x8B || p[1] != 0x45 || p[2] != 0xEC || p[3] != 0x50 || p[4] != 0xE8 || p[9] != 0xC3) continue;
+            sites++;
+            found = i + 9 + rd32(p + 5);                           /* call target (rel32, wraps) */
+        }
+    }
+    if (sites != 1 || found < 0x1000 || found >= rd32(pe + 24 + 56) - 32) return 0;
+    if (bytes_equal(exe + found, fs98_filter, 32)) { *x87 = 0; return found; }
+    for (int i = 0; i < 32; i++) {                                 /* dispatcher: its 2 table addresses vary */
+        if ((i >= 22 && i <= 25) || i >= 29) continue;
+        if (exe[found + i] != fs98_446_dispatch[i]) return 0;
+    }
+    *x87 = 1;
+    return found;
+}
+
 int core_setup(const CORE_API *a, const BYTE *exe, const BYTE *divtrap, int *which)
 {
+#ifdef CORE_TEST
     api = a;
+#else
+    (void)a;
+#endif
     *which = -1;
 
     /* Which supported build is this, and is it free of our EXE patch? */
@@ -134,24 +193,43 @@ int core_setup(const CORE_API *a, const BYTE *exe, const BYTE *divtrap, int *whi
         }
         known_but_patched = 1;
     }
-    if (!g) return known_but_patched ? SETUP_EXE_ALREADY_PATCHED : SETUP_NOT_SUPPORTED;
 
-    /* The game's own division filter */
-    const BYTE *fmod = g->filter_in_divtrap ? divtrap : exe;
-    if (!fmod) return SETUP_NO_FILTER_MODULE;
-    if (!bytes_equal(fmod + g->filter_rva, g->filter_start, 32))
-        return SETUP_FILTER_UNKNOWN;
-    g_filter = (FILTER)(fmod + g->filter_rva);
-    g_x87 = g->handles_x87;
+    if (g) {
+        /* A known build: its filter must be exactly where and what we expect. */
+        const BYTE *fmod = g->filter_in_divtrap ? divtrap : exe;
+        if (!fmod) return SETUP_NO_FILTER_MODULE;
+        if (!bytes_equal(fmod + g->filter_rva, g->filter_start, 32))
+            return SETUP_FILTER_UNKNOWN;
+        g_filter = (FILTER)(fmod + g->filter_rva);
+        g_x87 = g->handles_x87;
+    } else {
+        if (known_but_patched) return SETUP_EXE_ALREADY_PATCHED;
+        int nsec = pe[6] | (pe[7] << 8);                           /* our v3 EXE patch adds .fsfix */
+        const BYTE *sh = pe + 24 + (pe[20] | (pe[21] << 8));
+        for (int s = 0; s < nsec; s++, sh += 40)
+            if (bytes_equal(sh, (const BYTE *)".fsfix", 7)) return SETUP_EXE_ALREADY_PATCHED;
+        if (divtrap && bytes_equal(divtrap + 0x1010, divtrap_filter, 32)) {
+            g_filter = (FILTER)(divtrap + 0x1010);                 /* FS95-style: DIVTRAP.DLL's filter */
+            g_x87 = 0;
+            *which = -2;
+        } else {
+            int x87 = 0;
+            DWORD rva = find_exe_filter(exe, pe, &x87);
+            if (!rva) return SETUP_NOT_SUPPORTED;
+            g_filter = (FILTER)(exe + rva);                        /* FS98-style: the EXE's filter */
+            g_x87 = x87;
+            *which = -3;
+        }
+    }
 
     /* Game folder = folder of the EXE, in long-path form. If anything fails,
      * the location check stays off and every handled fault goes to the filter. */
     g_dirlen = 0;
-    if (api->GetModuleHandleExA && api->GetModuleFileNameA) {
+    if (HAVE_MODULE_FNS) {
         char tmp[PATH_BUF];
-        DWORD n = api->GetModuleFileNameA((HMODULE)exe, tmp, PATH_MAX_A);
+        DWORD n = W_GetModuleFileNameA((HMODULE)exe, tmp, PATH_MAX_A);
         if (n && n < PATH_MAX_A) {
-            DWORD m = api->GetLongPathNameA ? api->GetLongPathNameA(tmp, g_dir, PATH_BUF) : 0;
+            DWORD m = HAVE_LONGPATH ? W_GetLongPathNameA(tmp, g_dir, PATH_BUF) : 0;
             if (!m || m >= PATH_BUF) copy_str(g_dir, tmp, PATH_BUF);
             DWORD last = 0;
             for (DWORD i = 0; g_dir[i]; i++) if (g_dir[i] == '\\') last = i + 1;
