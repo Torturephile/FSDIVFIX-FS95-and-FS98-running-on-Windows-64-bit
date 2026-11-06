@@ -37,6 +37,7 @@ static HMODULE WINAPI k_GetModuleHandleA(const char *n)
     gmh_calls++;
     if (!n) return (HMODULE)0x400000;
     if (seq(n, "DIVTRAP.DLL")) return FS95 ? (HMODULE)0x83000000 : 0;
+    if (seq(n, "KERNEL32.DLL")) return (HMODULE)0x7E000000;
     return 0;
 }
 static BOOL WINAPI k_GetModuleHandleExA(DWORD flags, const char *addr, HMODULE *m)
@@ -56,11 +57,19 @@ static DWORD WINAPI k_GetModuleFileNameA(HMODULE h, char *buf, DWORD n)
 }
 static DWORD WINAPI k_GetLongPathNameA(const char *in, char *o, DWORD n) { if ((DWORD)slen(in) >= n) return slen(in) + 1; scpy(o, in); return slen(in); }
 static void *WINAPI k_AddVectoredExceptionHandler(DWORD first, HANDLER h) { avh_calls++; avh_first = first; registered = h; return (void *)1; }
+static int gpa_ok, gpa_calls;
+static void *WINAPI k_GetProcAddress(HMODULE m, const char *name)
+{
+    gpa_calls++;
+    if (m == (HMODULE)0x7E000000 && seq(name, "AddVectoredExceptionHandler")) { gpa_ok++; return (void *)k_AddVectoredExceptionHandler; }
+    return 0;
+}
 static BOOL WINAPI k_DisableThreadLibraryCalls(HMODULE h) { disabled_thread_calls += (DWORD)h == dll_base; return 1; }
 static const struct { const char *name; void *fn; } k32[] = {
     { "GetModuleHandleA", k_GetModuleHandleA }, { "GetModuleHandleExA", k_GetModuleHandleExA },
     { "GetModuleFileNameA", k_GetModuleFileNameA }, { "GetLongPathNameA", k_GetLongPathNameA },
     { "AddVectoredExceptionHandler", k_AddVectoredExceptionHandler }, { "DisableThreadLibraryCalls", k_DisableThreadLibraryCalls },
+    { "GetProcAddress", k_GetProcAddress },
 };
 
 /* ---- minimal PE loader ---- */
@@ -137,7 +146,7 @@ void _start(void)
     BYTE *dll = load_pe("FSDIVFIX.DLL", dll_base, 1);
 
     out("loading the real FSDIVFIX.DLL\n");
-    check(unresolved == 0, "all imports are the six expected KERNEL32 functions");
+    check(unresolved == 0, "all imports are the expected KERNEL32 functions");
     DWORD *linkage = get_export(dll, "Linkage");
     check(linkage != 0, "exports Linkage (GetProcAddress-style lookup)");
     int zeros = 1; for (int i = 1; i < 12; i++) zeros &= linkage[i] == 0;
@@ -148,13 +157,14 @@ void _start(void)
     BOOL (WINAPI *entry)(HMODULE, DWORD, void *) = (void *)(dll + rd32(opt + 16));
     check(entry((HMODULE)dll_base, 1, 0) == 1, "DllMain(PROCESS_ATTACH) returns TRUE");
     check(pinned == 1, "pinned itself in memory (survives FS95's FreeLibrary)");
+    check(gpa_calls == 1 && gpa_ok == 1, "looked up AddVectoredExceptionHandler in KERNEL32 (not imported)");
     check(disabled_thread_calls == 1, "DisableThreadLibraryCalls on itself");
     check(avh_calls == 1 && avh_first == 1 && registered && (DWORD)registered >= dll_base && (DWORD)registered < dll_base + dll_size,
           "registered one vectored handler, first in line, inside the DLL");
     entry((HMODULE)dll_base, 1, 0); entry((HMODULE)dll_base, 2, 0); entry((HMODULE)dll_base, 0, 0);
     check(avh_calls == 1 && pinned == 1, "repeat attach / thread / detach calls change nothing");
 
-    out("faults through the registered handler (DIVTRAP's real filter)\n");
+    out("faults through the registered handler (the game's real filter)\n");
     check(handled(fault(0xC0000095, 0x206B1A46)), "overflow in G3D.DLL: EAX=80000001 EDX=7FFFFFFF, EIP+2");
     check(handled(fault(0xC0000094, 0x00401000)), "divide by zero in the EXE: handled");
     check(passed(fault(0xC0000094, 0x75001000)), "divide fault in KERNEL32: passed on");
